@@ -1,20 +1,18 @@
 #include "transform.cpp"
-#include <bitset>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-// Helper function to reflect bits in a value
-uint64_t reflect(uint64_t data, int nBits) {
-  uint64_t reflection = 0;
-  for (int i = 0; i < nBits; ++i) {
-    if (data & 1) {
-      reflection |= (1ULL << ((nBits - 1) - i));
+// 位反转函数，用于 refin 和 refout 操作
+uint64_t reverseBits(uint64_t value, int bitWidth) {
+  uint64_t result = 0;
+  for (int i = 0; i < bitWidth; ++i) {
+    if (value & (1ULL << i)) {
+      result |= 1ULL << (bitWidth - 1 - i);
     }
-    data >>= 1;
   }
-  return reflection;
+  return result;
 }
 
 // 计算任意位宽的CRC值
@@ -41,7 +39,7 @@ uint64_t computeCRC(uint64_t data, const uint64_t poly, const int bitWidth) {
     }
   }
 
-  return crc & ((1ULL << bitWidth) - 1); // 返回bitWidth位的结果
+  return crc; // 返回bitWidth位的结果
 }
 
 // Generates CRC Table of 8 bits
@@ -57,43 +55,55 @@ std::vector<uint64_t> generateCrcTable(int bitWidth,
 // 使用查找表计算任意位宽的CRC值，输入为字符串
 uint64_t computeCRCWithTable(const std::vector<uint64_t> &table,
                              const std::string &data, const int bitWidth,
+                             const bool refIn = false,
+                             const bool refOut = false,
                              const uint64_t initial = 0,
                              const uint64_t finalXor = 0) {
   if (bitWidth <= 0 || bitWidth > 64) {
     throw std::invalid_argument("bitWidth must be between 1 and 64");
   }
 
-  // 初始化CRC寄存器为初始值
   uint64_t crc = initial;
 
-  // 逐字节处理数据
   for (char ch : data) {
     uint8_t byte = static_cast<uint8_t>(ch);
+    if (refIn) {
+      byte = static_cast<uint8_t>(reverseBits(byte, 8));
+    }
+    // todo: 如果bitWidth小于8 会怎样
     uint8_t index = (crc >> (bitWidth - 8)) ^ byte; // 确保索引在0-255之间
-    crc = table[index] ^ (crc << 8);
+    crc = table[index] ^ (crc << 8);                // 更新CRC值
+  }
+
+  if (refOut) {
+    crc = reverseBits(crc, bitWidth);
   }
 
   crc ^= finalXor;
-  return crc & ((1ULL << bitWidth) - 1); // 返回bitWidth位的结果
+
+  uint64_t mask = (bitWidth < 64) ? (1ULL << bitWidth) - 1 : ~0ULL;
+  return crc & mask;
 }
 
 int main() {
   try {
     std::string data = "hello world";
-    const int bitWidth = 8;
-    uint64_t polynomial = 0x07;
-    uint64_t initialValue = 0x00;
-    uint64_t finalXorValue = 0x00;
+    const int bitWidth = 16;
+    uint64_t polynomial = 0x1021;
+    uint64_t initialValue = 0;
+    uint64_t finalXorValue = 0;
+    bool refIn = false;
+    bool refOut = false;
 
     auto crcTable = generateCrcTable(bitWidth, polynomial);
 
-    uint64_t result = computeCRCWithTable(crcTable, data, bitWidth,
-                                          initialValue, finalXorValue);
+    uint64_t result = computeCRCWithTable(crcTable, data, bitWidth, refIn,
+                                          refOut, initialValue, finalXorValue);
 
     TransformOut resultOut(result, bitWidth);
 
-    std::cout << "data:" << data << ";\nCRC: " << resultOut.toBinary() << '\n'
-              << resultOut.toHexadecimal() << std::endl;
+    std::cout << "string:" << data << "\t hex:" << resultOut.toHexadecimal()
+              << std::endl;
 
   } catch (const std::exception &e) {
     std::cerr << "Error: " << e.what() << std::endl;
