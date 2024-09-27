@@ -47,4 +47,5 @@ CMakeUserPresets.json
 
 # build
 build
+dist
 .cache
