@@ -15,11 +15,10 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 file(GLOB SRC_FILES "src/*.cpp")
 file(GLOB TEST_FILES "tests/*.cpp")
 
-# add_library(crc_static STATIC ${SRC_FILES})
+add_library(crc_static STATIC ${SRC_FILES})
 add_library(crc_shared SHARED ${SRC_FILES})
 
-# 指定生成的库的名称（可选）
-# set_target_properties(crc_static PROPERTIES OUTPUT_NAME "crc")
+set_target_properties(crc_static PROPERTIES OUTPUT_NAME "crc")
 set_target_properties(crc_shared PROPERTIES OUTPUT_NAME "crc")
 
 add_executable(tests ${TEST_FILES})

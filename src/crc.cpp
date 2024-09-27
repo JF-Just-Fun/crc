@@ -87,8 +87,8 @@ uint64_t CRC::calculateCRC(const std::vector<uint64_t> &table,
 }
 
 CRC::CRC(const std::string &predefined) {
-  auto it = predefinedParams.find(predefined);
-  if (it != predefinedParams.end()) {
+  auto it = this->predefinedParams.find(predefined);
+  if (it != this->predefinedParams.end()) {
     params = it->second;
   } else {
     throw std::invalid_argument("Unsupported predefined parameter");
@@ -127,4 +127,12 @@ TransformOut CRC::file(const std::string &filePath) const {
       calculateCRC(table, bytes, params.bitWidth, params.refIn, params.refOut,
                    params.initialValue, params.finalXorValue);
   return TransformOut(crc, params.bitWidth);
+}
+
+std::vector<std::string> CRC::getPoly() const {
+  std::vector<std::string> keys;
+  for (const auto &pair : this->predefinedParams) {
+    keys.push_back(pair.first); // 将键添加到向量中
+  }
+  return keys;
 }
