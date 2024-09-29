@@ -27,6 +27,7 @@ public:
 private:
   std::vector<uint64_t> table;
   CRCParams params;
+  uint64_t mask;
   static const std::unordered_map<std::string, CRCParams> predefinedParams;
 
   uint64_t reverseBits(uint64_t value, int bitWidth) const;

@@ -136,8 +136,7 @@ uint64_t CRC::calculateCRC(const std::vector<uint64_t> &table,
     crc = reverseBits(crc, bitWidth);
   }
   crc ^= finalXor;
-  uint64_t mask = (bitWidth < 64) ? (1ULL << bitWidth) - 1 : ~0ULL;
-  return crc & mask;
+  return crc & this->mask;
 }
 
 CRC::CRC(const std::string &predefined) {
@@ -147,12 +146,28 @@ CRC::CRC(const std::string &predefined) {
   } else {
     throw std::invalid_argument("Unsupported predefined parameter");
   }
+  mask = (params.bitWidth < 64) ? (1ULL << params.bitWidth) - 1 : ~0ULL;
   table = generateCrcTable(params.bitWidth, params.polynomial);
 }
 
 CRC::CRC(int bitWidth, uint64_t polynomial, uint64_t initialValue,
          uint64_t finalXorValue, bool refIn, bool refOut)
     : params{bitWidth, polynomial, initialValue, finalXorValue, refIn, refOut} {
+  mask = (params.bitWidth < 64) ? (1ULL << params.bitWidth) - 1 : ~0ULL;
+
+  if (bitWidth <= 0 || bitWidth > 64) {
+    throw std::invalid_argument("Invalid bit width.");
+  }
+  if ((polynomial & ~this->mask) != 0) {
+    throw std::invalid_argument("Polynomial exceeds specified bit width.");
+  }
+  if ((initialValue & ~this->mask) != 0) {
+    throw std::invalid_argument("Initial value exceeds specified bit width.");
+  }
+  if ((finalXorValue & ~this->mask) != 0) {
+    throw std::invalid_argument("Final XOR value exceeds specified bit width.");
+  }
+
   table = generateCrcTable(bitWidth, polynomial);
 }
 
