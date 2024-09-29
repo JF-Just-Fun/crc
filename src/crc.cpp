@@ -85,10 +85,6 @@ uint64_t CRC::reverseBits(uint64_t value, int bitWidth) const {
 
 uint64_t CRC::singleCRC(uint64_t data, const uint64_t poly,
                         const int bitWidth) const {
-  if (bitWidth <= 0 || bitWidth > 64) {
-    throw std::invalid_argument("bitWidth must be between 1 and 64");
-  }
-
   uint64_t crc = 0;
   const uint64_t mask = 1ULL << (bitWidth - 1);
   for (int i = 0; i < bitWidth; ++i) {
@@ -119,10 +115,6 @@ uint64_t CRC::calculateCRC(const std::vector<uint64_t> &table,
                            const bool refIn, const bool refOut,
                            const uint64_t initial,
                            const uint64_t finalXor) const {
-  if (bitWidth <= 0 || bitWidth > 64) {
-    throw std::invalid_argument("bitWidth must be between 1 and 64");
-  }
-
   uint64_t crc = initial;
   for (uint8_t byte : data) {
     if (refIn) {
