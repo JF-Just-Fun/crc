@@ -22,4 +22,4 @@ set_target_properties(crc_static PROPERTIES OUTPUT_NAME "crc")
 set_target_properties(crc_shared PROPERTIES OUTPUT_NAME "crc")
 
 add_executable(tests ${TEST_FILES})
-target_link_libraries(tests crc_static)
+target_link_libraries(tests crc_shared)

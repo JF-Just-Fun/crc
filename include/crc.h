@@ -20,7 +20,7 @@ public:
   CRC(int bitWidth, uint64_t polynomial, uint64_t initialValue,
       uint64_t finalXorValue, bool refIn, bool refOut);
 
-  std::vector<std::string> getPoly() const;
+  static std::vector<std::string> getPoly();
   TransformOut string(const std::string &data) const;
   TransformOut file(const std::string &filePath) const;
 
