@@ -64,6 +64,7 @@
     "xlocmes": "cpp",
     "xlocnum": "cpp",
     "xloctime": "cpp",
-    "xmemory": "cpp"
+    "xmemory": "cpp",
+    "__config": "cpp"
   }
 }

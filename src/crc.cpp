@@ -70,10 +70,12 @@ const std::unordered_map<std::string, CRC::CRCParams> CRC::predefinedParams = {
     {"crc-64-ECMA-182",
      {64, 0x42F0E1EBA9EA3693, 0x0000000000000000, 0x0000000000000000, false,
       false}},
-    // 添加其他预设参数
 };
 
 uint64_t CRC::reverseBits(uint64_t value, int bitWidth) const {
+  if (bitWidth == -1) {
+    bitWidth = this->params.bitWidth;
+  }
   uint64_t result = 0;
   for (int i = 0; i < bitWidth; ++i) {
     if (value & (1ULL << i)) {
@@ -83,11 +85,11 @@ uint64_t CRC::reverseBits(uint64_t value, int bitWidth) const {
   return result;
 }
 
-uint64_t CRC::singleCRC(uint64_t data, const uint64_t poly,
-                        const int bitWidth) const {
+uint64_t CRC::singleCRC(uint64_t data) {
   uint64_t crc = 0;
-  const uint64_t mask = 1ULL << (bitWidth - 1);
-  for (int i = 0; i < bitWidth; ++i) {
+  const uint64_t mask = 1ULL << (this->params.bitWidth - 1);
+
+  for (int i = 0; i < this->params.bitWidth; ++i) {
     bool bit = crc & mask;
     crc <<= 1;
     if (data & mask) {
@@ -95,39 +97,68 @@ uint64_t CRC::singleCRC(uint64_t data, const uint64_t poly,
     }
     data <<= 1;
     if (bit) {
-      crc ^= poly;
+      crc ^= this->params.polynomial;
     }
   }
-  return crc; // 返回bitWidth位的结果
+  return crc;
 }
 
-std::vector<uint64_t> CRC::generateCrcTable(int bitWidth,
-                                            const uint64_t polynomial) {
-  std::vector<uint64_t> table(256);
-  for (uint64_t i = 0; i < 256; ++i) {
-    table[i] = singleCRC(i, polynomial, bitWidth);
+std::vector<uint64_t> CRC::generateCrcTable() {
+  const int range = this->bigTable ? 1 << 16 : 1 << 8;
+  std::vector<uint64_t> table(range);
+  for (uint64_t i = 0; i < range; ++i) {
+    table[i] = singleCRC(i);
   }
   return table;
 }
 
-uint64_t CRC::calculateCRC(const std::vector<uint64_t> &table,
-                           const std::vector<uint8_t> &data, const int bitWidth,
-                           const bool refIn, const bool refOut,
-                           const uint64_t initial,
-                           const uint64_t finalXor) const {
-  uint64_t crc = initial;
-  for (uint8_t byte : data) {
-    if (refIn) {
+uint64_t CRC::calculateCRC(const std::vector<uint8_t> &data) const {
+  uint64_t crc = this->params.initialValue;
+  size_t dataSize = data.size();
+
+  auto processByte = [&](uint8_t byte) {
+    if (this->params.refIn) {
       byte = static_cast<uint8_t>(reverseBits(byte, 8));
     }
-    uint8_t index = (crc >> (bitWidth - 8)) ^ byte; // 确保索引在0-255之间
-    crc = table[index] ^ (crc << 8);                // 更新CRC值
+    uint8_t index = (crc >> (this->params.bitWidth - 8)) ^ byte;
+    crc = this->table[index] ^ (crc << 8);
+  };
+
+  auto processCombinedBytes = [&](uint16_t combinedBytes) {
+    uint16_t index =
+        ((crc >> (this->params.bitWidth - 16)) ^ combinedBytes) & 0xFFFF;
+    crc = this->table[index] ^ (crc << 16);
+  };
+
+  size_t i = 0;
+  if (this->bigTable) {
+    while (i + 1 < dataSize) {
+      uint8_t byte1 = data[i];
+      uint8_t byte2 = data[i + 1];
+
+      if (this->params.refIn) {
+        byte1 = static_cast<uint16_t>(reverseBits(byte1, 8));
+        byte2 = static_cast<uint16_t>(reverseBits(byte2, 8));
+      }
+
+      uint16_t combinedBytes = byte1 | byte2;
+      processCombinedBytes(combinedBytes);
+      i += 2;
+    }
+
+    if (i < dataSize) {
+      processByte(this->params.refIn ? reverseBits(data[i], 8) : data[i]);
+    }
+  } else {
+    for (; i < dataSize; ++i) {
+      processByte(data[i]);
+    }
   }
 
-  if (refOut) {
-    crc = reverseBits(crc, bitWidth);
+  if (this->params.refOut) {
+    crc = reverseBits(crc);
   }
-  crc ^= finalXor;
+  crc ^= this->params.finalXorValue;
   return crc & this->mask;
 }
 
@@ -138,45 +169,46 @@ CRC::CRC(const std::string &predefined) {
   } else {
     throw std::invalid_argument("Unsupported predefined parameter");
   }
-  mask = (params.bitWidth < 64) ? (1ULL << params.bitWidth) - 1 : ~0ULL;
-  table = generateCrcTable(params.bitWidth, params.polynomial);
+
+  this->mask = (params.bitWidth < 64) ? (1ULL << params.bitWidth) - 1 : ~0ULL;
 }
 
-CRC::CRC(int bitWidth, uint64_t polynomial, uint64_t initialValue,
-         uint64_t finalXorValue, bool refIn, bool refOut)
-    : params{bitWidth, polynomial, initialValue, finalXorValue, refIn, refOut} {
-  mask = (params.bitWidth < 64) ? (1ULL << params.bitWidth) - 1 : ~0ULL;
+CRC::CRC(const CRCParams &crcParams) : params{crcParams} {
+  this->mask = (this->params.bitWidth < 64)
+                   ? (1ULL << this->params.bitWidth) - 1
+                   : ~0ULL;
 
-  if (bitWidth <= 0 || bitWidth > 64) {
+  if (this->params.bitWidth <= 0 || this->params.bitWidth > 64) {
     throw std::invalid_argument("Invalid bit width.");
   }
-  if ((polynomial & ~this->mask) != 0) {
+  if ((this->params.polynomial & ~this->mask) != 0) {
     throw std::invalid_argument("Polynomial exceeds specified bit width.");
   }
-  if ((initialValue & ~this->mask) != 0) {
+  if ((this->params.initialValue & ~this->mask) != 0) {
     throw std::invalid_argument("Initial value exceeds specified bit width.");
   }
-  if ((finalXorValue & ~this->mask) != 0) {
+  if ((this->params.finalXorValue & ~this->mask) != 0) {
     throw std::invalid_argument("Final XOR value exceeds specified bit width.");
   }
-
-  table = generateCrcTable(bitWidth, polynomial);
 }
 
-TransformOut CRC::string(const std::string &data) const {
+TransformOut CRC::string(const std::string &data) {
   std::vector<uint8_t> bytes(data.begin(), data.end());
-  uint64_t crc =
-      calculateCRC(table, bytes, params.bitWidth, params.refIn, params.refOut,
-                   params.initialValue, params.finalXorValue);
+
+  this->bigTable = false;
+  this->table = generateCrcTable();
+
+  uint64_t crc = calculateCRC(bytes);
 
   return TransformOut(crc, params.bitWidth);
 }
 
-TransformOut CRC::file(const std::string &filePath) const {
+TransformOut CRC::file(const std::string &filePath) {
   std::ifstream file(filePath, std::ios::binary);
   if (!file.is_open()) {
     throw std::runtime_error("Failed to open file: " + filePath);
   }
+  this->table = generateCrcTable();
 
   std::vector<uint8_t> bytes;
   char ch;
@@ -184,9 +216,7 @@ TransformOut CRC::file(const std::string &filePath) const {
     bytes.push_back(static_cast<uint8_t>(ch));
   }
 
-  uint64_t crc =
-      calculateCRC(table, bytes, params.bitWidth, params.refIn, params.refOut,
-                   params.initialValue, params.finalXorValue);
+  uint64_t crc = calculateCRC(bytes);
   return TransformOut(crc, params.bitWidth);
 }
 

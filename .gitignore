@@ -49,3 +49,4 @@ CMakeUserPresets.json
 build
 dist
 .cache
+cmake-build-debug

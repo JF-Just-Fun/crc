@@ -6,6 +6,7 @@
 #include <vector>
 
 class CRC {
+
 public:
   struct CRCParams {
     int bitWidth;
@@ -16,30 +17,27 @@ public:
     bool refOut;
   };
 
-  CRC(const std::string &predefined);
-  CRC(int bitWidth, uint64_t polynomial, uint64_t initialValue,
-      uint64_t finalXorValue, bool refIn, bool refOut);
+  explicit CRC(const std::string &predefined);
+  explicit CRC(const CRCParams &crcParams);
 
   static std::vector<std::string> getPoly();
-  TransformOut string(const std::string &data) const;
-  TransformOut file(const std::string &filePath) const;
+
+  [[nodiscard]] TransformOut string(const std::string &data);
+
+  [[nodiscard]] TransformOut file(const std::string &filePath);
 
 private:
   std::vector<uint64_t> table;
   CRCParams params;
   uint64_t mask;
+  bool bigTable = false;
   static const std::unordered_map<std::string, CRCParams> predefinedParams;
 
-  uint64_t reverseBits(uint64_t value, int bitWidth) const;
+  [[nodiscard]] uint64_t reverseBits(uint64_t value, int bitWidth = -1) const;
 
-  uint64_t singleCRC(uint64_t data, const uint64_t poly,
-                     const int bitWidth) const;
+  uint64_t singleCRC(uint64_t data);
 
-  std::vector<uint64_t> generateCrcTable(int bitWidth,
-                                         const uint64_t polynomial);
+  std::vector<uint64_t> generateCrcTable();
 
-  uint64_t calculateCRC(const std::vector<uint64_t> &table,
-                        const std::vector<uint8_t> &data, const int bitWidth,
-                        const bool refIn, const bool refOut,
-                        const uint64_t initial, const uint64_t finalXor) const;
+  [[nodiscard]] uint64_t calculateCRC(const std::vector<uint8_t> &data) const;
 };
