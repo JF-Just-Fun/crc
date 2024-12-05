@@ -65,6 +65,13 @@
     "xlocnum": "cpp",
     "xloctime": "cpp",
     "xmemory": "cpp",
-    "__config": "cpp"
+    "__config": "cpp",
+    "condition_variable": "cpp",
+    "functional": "cpp",
+    "future": "cpp",
+    "chrono": "cpp",
+    "filesystem": "cpp",
+    "forward_list": "cpp",
+    "array": "cpp"
   }
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "transform.h"
+#include <array>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -28,6 +29,7 @@ public:
 
 private:
   std::vector<uint64_t> table;
+  std::array<uint8_t, 256> reverseTable;
   CRCParams params;
   uint64_t mask;
   bool bigTable = false;
@@ -37,7 +39,10 @@ private:
 
   uint64_t singleCRC(uint64_t data);
 
-  std::vector<uint64_t> generateCrcTable();
+  void generateCrcTable();
+  void generateReverseTable();
 
-  [[nodiscard]] uint64_t calculateCRC(const std::vector<uint8_t> &data) const;
+  // [[nodiscard]] uint64_t calculateCRC(const std::vector<uint8_t> &data)
+  // const;
+  [[nodiscard]] uint64_t calculateCRC(uint8_t data, uint64_t crc) const;
 };

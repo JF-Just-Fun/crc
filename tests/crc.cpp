@@ -6,7 +6,6 @@
 void Tests::test_crc() {
   try {
 
-    test_custom();
     // std::string data = "asd";
     // std::string filePath = "D:\\my-projects\\crc\\dist.rar";
     // "D:\\Users\\Admin\\Downloads\\AetherGazer_EN-1.0.0-game (1).zip";

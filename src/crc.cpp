@@ -1,8 +1,10 @@
 #include "crc.h"
 
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <stdexcept>
+#include <thread>
 
 const std::unordered_map<std::string, CRC::CRCParams> CRC::predefinedParams = {
     {"crc-8", {8, 0x07, 0x00, 0x00, false, false}},
@@ -103,65 +105,49 @@ uint64_t CRC::singleCRC(uint64_t data) {
   return crc;
 }
 
-std::vector<uint64_t> CRC::generateCrcTable() {
+void CRC::generateCrcTable() {
   const int range = this->bigTable ? 1 << 16 : 1 << 8;
-  std::vector<uint64_t> table(range);
   for (uint64_t i = 0; i < range; ++i) {
-    table[i] = singleCRC(i);
+    this->table.push_back(this->singleCRC(i));
   }
-  return table;
 }
 
-uint64_t CRC::calculateCRC(const std::vector<uint8_t> &data) const {
-  uint64_t crc = this->params.initialValue;
-  size_t dataSize = data.size();
-
-  auto processByte = [&](uint8_t byte) {
-    if (this->params.refIn) {
-      byte = static_cast<uint8_t>(reverseBits(byte, 8));
-    }
-    uint8_t index = (crc >> (this->params.bitWidth - 8)) ^ byte;
-    crc = this->table[index] ^ (crc << 8);
-  };
-
-  auto processCombinedBytes = [&](uint16_t combinedBytes) {
-    uint16_t index =
-        ((crc >> (this->params.bitWidth - 16)) ^ combinedBytes) & 0xFFFF;
-    crc = this->table[index] ^ (crc << 16);
-  };
-
-  size_t i = 0;
-  if (this->bigTable) {
-    while (i + 1 < dataSize) {
-      uint8_t byte1 = data[i];
-      uint8_t byte2 = data[i + 1];
-
-      if (this->params.refIn) {
-        byte1 = static_cast<uint16_t>(reverseBits(byte1, 8));
-        byte2 = static_cast<uint16_t>(reverseBits(byte2, 8));
-      }
-
-      uint16_t combinedBytes = byte1 | byte2;
-      processCombinedBytes(combinedBytes);
-      i += 2;
-    }
-
-    if (i < dataSize) {
-      processByte(this->params.refIn ? reverseBits(data[i], 8) : data[i]);
-    }
-  } else {
-    for (; i < dataSize; ++i) {
-      processByte(data[i]);
-    }
+void CRC::generateReverseTable() {
+  for (int i = 0; i < 256; ++i) {
+    uint8_t value = static_cast<uint8_t>(i);
+    this->reverseTable[i] = this->reverseBits(value, 8);
   }
+}
 
+uint64_t CRC::calculateCRC(uint8_t data, uint64_t crc) const {
+  if (this->params.refIn) {
+    data = this->reverseTable[data];
+  }
+  uint8_t index = (crc >> (this->params.bitWidth - 8)) ^ data;
+  crc = this->table[index] ^ (crc << 8);
+
+  return crc;
+}
+
+TransformOut CRC::file(const std::string &filePath) {
+  std::ifstream file(filePath, std::ios::binary);
+  if (!file.is_open()) {
+    throw std::runtime_error("Failed to open file: " + filePath);
+  }
+  this->bigTable = false;
+
+  uint64_t crc = this->params.initialValue;
+  char ch;
+  while (file.get(ch)) {
+    crc = calculateCRC(ch, crc);
+  }
   if (this->params.refOut) {
     crc = reverseBits(crc);
   }
   crc ^= this->params.finalXorValue;
-  return crc & this->mask;
-}
 
+  return TransformOut(crc & this->mask, params.bitWidth);
+}
 CRC::CRC(const std::string &predefined) {
   auto it = CRC::predefinedParams.find(predefined);
   if (it != CRC::predefinedParams.end()) {
@@ -171,6 +157,8 @@ CRC::CRC(const std::string &predefined) {
   }
 
   this->mask = (params.bitWidth < 64) ? (1ULL << params.bitWidth) - 1 : ~0ULL;
+  this->generateCrcTable();
+  this->generateReverseTable();
 }
 
 CRC::CRC(const CRCParams &crcParams) : params{crcParams} {
@@ -190,35 +178,77 @@ CRC::CRC(const CRCParams &crcParams) : params{crcParams} {
   if ((this->params.finalXorValue & ~this->mask) != 0) {
     throw std::invalid_argument("Final XOR value exceeds specified bit width.");
   }
+  this->generateCrcTable();
+  this->generateReverseTable();
 }
 
 TransformOut CRC::string(const std::string &data) {
   std::vector<uint8_t> bytes(data.begin(), data.end());
 
   this->bigTable = false;
-  this->table = generateCrcTable();
 
-  uint64_t crc = calculateCRC(bytes);
+  uint64_t crc = this->params.initialValue;
+  for (uint8_t byte : bytes) {
+    crc = calculateCRC(byte, crc);
+  }
+  if (this->params.refOut) {
+    crc = reverseBits(crc);
+  }
+  crc ^= this->params.finalXorValue;
 
   return TransformOut(crc, params.bitWidth);
 }
 
-TransformOut CRC::file(const std::string &filePath) {
-  std::ifstream file(filePath, std::ios::binary);
+void read_file_segment(const std::string &filename, std::streampos start,
+                       std::streamsize size, std::vector<uint8_t> &buffer) {
+  std::ifstream file(filename, std::ios::binary);
   if (!file.is_open()) {
-    throw std::runtime_error("Failed to open file: " + filePath);
-  }
-  this->table = generateCrcTable();
-
-  std::vector<uint8_t> bytes;
-  char ch;
-  while (file.get(ch)) {
-    bytes.push_back(static_cast<uint8_t>(ch));
+    throw std::runtime_error("segment failed to open file: " + filename);
   }
 
-  uint64_t crc = calculateCRC(bytes);
-  return TransformOut(crc, params.bitWidth);
+  file.seekg(start);
+  for (std::streamsize i = 0; i < size; i++) {
+    char ch;
+    if (!file.get(ch)) {
+      break;
+    }
+    buffer[start + i] = static_cast<uint8_t>(ch);
+  }
 }
+
+// TransformOut CRC::file(const std::string &filePath) {
+//   std::ifstream file(filePath, std::ios::ate | std::ios::binary);
+//   if (!file.is_open()) {
+//     throw std::runtime_error("Failed to open file: " + filePath);
+//   }
+
+//   std::streampos filesize = file.tellg();
+//   file.close();
+
+//   this->bigTable = true;
+//   this->table = generateCrcTable();
+
+//   const int num_threads = 4;
+//   std::streamsize segment_size = filesize / num_threads;
+
+//   std::vector<uint8_t> bytes(filesize);
+//   std::vector<std::thread> threads;
+
+//   for (int i = 0; i < num_threads; ++i) {
+//     std::streampos start = i * segment_size;
+//     std::streamsize size =
+//         (i == num_threads - 1) ? (filesize - start) : segment_size;
+//     threads.emplace_back(read_file_segment, filePath, start, size,
+//                          std::ref(bytes));
+//   }
+
+//   for (auto &t : threads) {
+//     t.join();
+//   }
+
+//   uint64_t crc = calculateCRC(bytes);
+//   return TransformOut(crc, this->params.bitWidth);
+// }
 
 std::vector<std::string> CRC::getPoly() {
   std::vector<std::string> keys;
