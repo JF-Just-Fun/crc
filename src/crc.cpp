@@ -1,7 +1,6 @@
 #include "crc.h"
 
 #include <fstream>
-#include <future>
 #include <iostream>
 #include <stdexcept>
 #include <thread>
@@ -107,8 +106,9 @@ uint64_t CRC::singleCRC(uint64_t data) {
 
 void CRC::generateCrcTable() {
   const int range = this->bigTable ? 1 << 16 : 1 << 8;
+  this->table.resize(range);
   for (uint64_t i = 0; i < range; ++i) {
-    this->table.push_back(this->singleCRC(i));
+    this->table[i] = this->singleCRC(i);
   }
 }
 
@@ -129,25 +129,6 @@ uint64_t CRC::calculateCRC(uint8_t data, uint64_t crc) const {
   return crc;
 }
 
-TransformOut CRC::file(const std::string &filePath) {
-  std::ifstream file(filePath, std::ios::binary);
-  if (!file.is_open()) {
-    throw std::runtime_error("Failed to open file: " + filePath);
-  }
-  this->bigTable = false;
-
-  uint64_t crc = this->params.initialValue;
-  char ch;
-  while (file.get(ch)) {
-    crc = calculateCRC(ch, crc);
-  }
-  if (this->params.refOut) {
-    crc = reverseBits(crc);
-  }
-  crc ^= this->params.finalXorValue;
-
-  return TransformOut(crc & this->mask, params.bitWidth);
-}
 CRC::CRC(const std::string &predefined) {
   auto it = CRC::predefinedParams.find(predefined);
   if (it != CRC::predefinedParams.end()) {
@@ -199,61 +180,65 @@ TransformOut CRC::string(const std::string &data) {
   return TransformOut(crc, params.bitWidth);
 }
 
-void read_file_segment(const std::string &filename, std::streampos start,
-                       std::streamsize size, std::vector<uint8_t> &buffer) {
-  std::ifstream file(filename, std::ios::binary);
+TransformOut CRC::file(const std::string &filePath) {
+  std::ifstream file(filePath, std::ios::binary);
+
   if (!file.is_open()) {
-    throw std::runtime_error("segment failed to open file: " + filename);
+    std::cerr << "Error opening file: " << std::strerror(errno) << std::endl;
+    throw std::runtime_error("Failed to open file: " + filePath);
   }
 
-  file.seekg(start);
-  for (std::streamsize i = 0; i < size; i++) {
-    char ch;
-    if (!file.get(ch)) {
-      break;
-    }
-    buffer[start + i] = static_cast<uint8_t>(ch);
+  this->bigTable = true;
+
+  file.seekg(0, std::ios::end);
+  std::streampos filesize = file.tellg();
+  const int num_threads = std::thread::hardware_concurrency();
+  std::streamsize segmentSize = filesize / num_threads;
+  file.close();
+
+  std::vector<std::thread> threads;
+
+  std::vector<uint64_t> crcs(num_threads);
+  for (int i = 0; i < num_threads; ++i) {
+    std::streampos start = i * segmentSize;
+    std::streamsize size =
+        (i == num_threads - 1) ? (filesize - start) : segmentSize;
+    crcs.push_back(i == 0 ? this->params.initialValue
+                          : 0 << this->params.bitWidth);
+    threads.emplace_back([this, filePath, start, size, &crcs, i]() {
+      std::ifstream file(filePath, std::ios::binary);
+      file.seekg(start);
+      char byte;
+      for (size_t j = 0; j < size; j++) {
+        file.read(&byte, 1);
+        crcs[i] = calculateCRC(byte, crcs[i]);
+      }
+      file.close();
+    });
   }
+
+  for (auto &t : threads) {
+    t.join();
+  }
+
+  uint64_t crc = this->params.initialValue;
+
+  for (int i = 0; i < num_threads; ++i) {
+    // todo: fix crc combine
+    crc = crcs[i] ^ (crc << 8);
+  }
+  if (this->params.refOut) {
+    crc = reverseBits(crc, this->params.bitWidth);
+  }
+  crc ^= this->params.finalXorValue;
+
+  return TransformOut(crc & this->mask, params.bitWidth);
 }
-
-// TransformOut CRC::file(const std::string &filePath) {
-//   std::ifstream file(filePath, std::ios::ate | std::ios::binary);
-//   if (!file.is_open()) {
-//     throw std::runtime_error("Failed to open file: " + filePath);
-//   }
-
-//   std::streampos filesize = file.tellg();
-//   file.close();
-
-//   this->bigTable = true;
-//   this->table = generateCrcTable();
-
-//   const int num_threads = 4;
-//   std::streamsize segment_size = filesize / num_threads;
-
-//   std::vector<uint8_t> bytes(filesize);
-//   std::vector<std::thread> threads;
-
-//   for (int i = 0; i < num_threads; ++i) {
-//     std::streampos start = i * segment_size;
-//     std::streamsize size =
-//         (i == num_threads - 1) ? (filesize - start) : segment_size;
-//     threads.emplace_back(read_file_segment, filePath, start, size,
-//                          std::ref(bytes));
-//   }
-
-//   for (auto &t : threads) {
-//     t.join();
-//   }
-
-//   uint64_t crc = calculateCRC(bytes);
-//   return TransformOut(crc, this->params.bitWidth);
-// }
 
 std::vector<std::string> CRC::getPoly() {
   std::vector<std::string> keys;
   for (const auto &pair : CRC::predefinedParams) {
-    keys.push_back(pair.first); // 将键添加到向量中
+    keys.push_back(pair.first);
   }
   return keys;
 }
