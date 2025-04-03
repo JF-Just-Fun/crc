@@ -109,13 +109,7 @@ void CRC::generateCrcTable() {
     this->table.resize(range);
     for (uint64_t i = 0; i < range; ++i) {
         this->table[i] = this->singleCRC(i);
-    }
-}
-
-void CRC::generateReverseTable() {
-    for (int i = 0; i < 256; ++i) {
-        auto value = static_cast<uint8_t>(i);
-        this->reverseTable[i] = this->reverseBits(value, 8);
+        if (this->params.refIn) this->reverseTable[i] = this->reverseBits(i, 8);
     }
 }
 
@@ -139,7 +133,6 @@ CRC::CRC(const std::string &predefined) {
 
     this->mask = (params.bitWidth < 64) ? (1ULL << params.bitWidth) - 1 : ~0ULL;
     this->generateCrcTable();
-    this->generateReverseTable();
 }
 
 CRC::CRC(const CRCParams &crcParams) : params{crcParams} {
@@ -160,7 +153,6 @@ CRC::CRC(const CRCParams &crcParams) : params{crcParams} {
         throw std::invalid_argument("Final XOR value exceeds specified bit width.");
     }
     this->generateCrcTable();
-    this->generateReverseTable();
 }
 
 TransformOut CRC::string(const std::string &data) {
@@ -188,7 +180,7 @@ TransformOut CRC::file(const std::string &filePath) {
 
     uint64_t crc = this->params.initialValue;
 
-    constexpr size_t BLOCK_SIZE = 128;
+    constexpr size_t BLOCK_SIZE = 1024;
     char buffer[BLOCK_SIZE];
     while (file.read(buffer, BLOCK_SIZE)) {
         for (char i: buffer) {
@@ -200,6 +192,22 @@ TransformOut CRC::file(const std::string &filePath) {
         crc = calculateCRC(buffer[i], crc);
     }
     file.close();
+
+    if (this->params.refOut) {
+        crc = reverseBits(crc, this->params.bitWidth);
+    }
+    crc ^= this->params.finalXorValue;
+
+    return {crc, params.bitWidth};
+}
+
+TransformOut CRC::buffer(const char *buffer, size_t length) {
+    uint64_t crc = this->params.initialValue;
+    const char *data = static_cast<const char *>(buffer);
+
+    for (size_t i = 0; i < length; ++i) {
+        crc = calculateCRC(data[i], crc);
+    }
 
     if (this->params.refOut) {
         crc = reverseBits(crc, this->params.bitWidth);
